@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -24,19 +25,34 @@ model_paths = {
     "Support Vector Machine": "model/support_vector_machine.pkl"
 }
 
-# Sidebar controls
-st.sidebar.header("1. Upload Test Dataset")
-uploaded_file = st.sidebar.file_uploader("Upload test_data.csv", type=["csv"])
+# --- Sidebar Controls ---
+st.sidebar.header("Test Dataset")
 
-st.sidebar.header("2. Model Selection")
+# Option to use bundled dataset by default (like Samriddhi's app)
+use_bundled = st.sidebar.checkbox("Use bundled test_data.csv", value=True)
+uploaded_file = st.sidebar.file_uploader("Upload another CSV", type=["csv"])
+
+st.sidebar.markdown("---")
+st.sidebar.header("Model Selection")
 selected_model_name = st.sidebar.selectbox("Choose a classifier", list(model_paths.keys()))
+
+# Determine which data source to read
+df_test = None
 
 if uploaded_file is not None:
     df_test = pd.read_csv(uploaded_file)
-    st.subheader("Uploaded Test Data Preview")
-    st.dataframe(df_test.head(5))
+elif use_bundled and os.path.exists("test_data.csv"):
+    df_test = pd.read_csv("test_data.csv")
+
+# --- Main Evaluation View ---
+if df_test is not None:
+    # Top Dataset Summary Cards
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Total Test Records", f"{len(df_test):,}")
+    m2.metric("Input Features", f"{df_test.shape[1] - 1}")
+    m3.metric("ML Models", "5")
     
-    # Target column extraction
+    # Identify target column
     target_col = None
     for col in df_test.columns:
         if "default" in col.lower() or "target" in col.lower():
@@ -44,11 +60,17 @@ if uploaded_file is not None:
             break
             
     if target_col is None:
-        st.error("Target column indicating credit default not found in CSV.")
+        st.error("Target column indicating credit default not found in dataset.")
         st.stop()
         
     y_test = df_test[target_col].astype(int)
     X_test = df_test.drop(columns=[target_col])
+    
+    default_rate = (y_test.sum() / len(y_test)) * 100
+    m4.metric("Test Default Rate", f"{default_rate:.2f}%")
+    
+    st.markdown("---")
+    st.subheader(f"Individual Model Evaluation: {selected_model_name}")
     
     # Load serialized model pipeline
     model_path = model_paths[selected_model_name]
@@ -57,7 +79,7 @@ if uploaded_file is not None:
     y_pred = pipe.predict(X_test)
     y_prob = pipe.predict_proba(X_test)[:, 1] if hasattr(pipe, "predict_proba") else y_pred
     
-    # Compute Metrics
+    # Compute the 6 primary metrics
     acc = accuracy_score(y_test, y_pred)
     auc = roc_auc_score(y_test, y_prob)
     prec = precision_score(y_test, y_pred, zero_division=0)
@@ -65,8 +87,7 @@ if uploaded_file is not None:
     f1 = f1_score(y_test, y_pred, zero_division=0)
     mcc = matthews_corrcoef(y_test, y_pred)
     
-    st.markdown("---")
-    st.subheader(f"Evaluation Metrics: {selected_model_name}")
+    # Display the 6 metric cards
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("Accuracy", f"{acc:.4f}")
     c2.metric("AUC Score", f"{auc:.4f}")
@@ -94,5 +115,9 @@ if uploaded_file is not None:
         report = classification_report(y_test, y_pred, output_dict=True)
         report_df = pd.DataFrame(report).transpose()
         st.dataframe(report_df.style.format("{:.4f}"))
+        
+    st.markdown("---")
+    with st.expander("Preview Test Dataset Rows"):
+        st.dataframe(df_test.head(10))
 else:
-    st.info("👈 Please upload `test_data.csv` from the sidebar to inspect metrics.")
+    st.info("👈 Please check 'Use bundled test_data.csv' or upload a CSV file from the sidebar.")
